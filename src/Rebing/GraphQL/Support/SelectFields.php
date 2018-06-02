@@ -6,6 +6,7 @@ use Closure;
 use GraphQL\Error\InvariantViolation;
 use GraphQL\Type\Definition\InterfaceType;
 use GraphQL\Type\Definition\ListOfType;
+use GraphQL\Type\Definition\NonNull;
 use GraphQL\Type\Definition\ResolveInfo;
 use GraphQL\Type\Definition\UnionType;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -62,7 +63,7 @@ class SelectFields {
         {
             $parentType = $parentType->getWrappedType();
         }
-        $parentTable = self::getTableNameFromParentType($parentType);
+        $parentTable = ''; self::getTableNameFromParentType($parentType);
         $primaryKey = self::getPrimaryKeyFromParentType($parentType);
 
         self::handleFields($requestedFields, $parentType, $select, $with);
@@ -101,9 +102,13 @@ class SelectFields {
      * Get the selects and withs from the given fields
      * and recurse if necessary
      */
-    protected static function handleFields(array $requestedFields, $parentType, array &$select, array &$with)
+    protected static function handleFields(array $requestedFields, $parentType, array &$select, array &$with, $prefix = '')
     {
         $parentTable = self::getTableNameFromParentType($parentType);
+
+        if($parentType instanceof NonNull) {
+            return self::handleFields($requestedFields, $parentType->getWrappedType(), $select, $with, $prefix);
+        }
 
         foreach($requestedFields as $key => $field)
         {
@@ -116,7 +121,7 @@ class SelectFields {
             // Always select foreign key
             if ($field === self::FOREIGN_KEY)
             {
-                self::addFieldToSelect($key, $select, $parentTable, false);
+                self::addFieldToSelect($prefix . $key, $select, $parentTable, false);
                 continue;
             }
 
@@ -150,6 +155,12 @@ class SelectFields {
                 {
                     if (isset($parentType->config['model']))
                     {
+                        if( ! method_exists($parentType->config['model'], $key)) {
+                            $name = $fieldObject->config['alias'] ?? $fieldObject->config['name'];
+                            static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
+                            continue;
+                        }
+
                         // Get the next parent type, so that 'with' queries could be made
                         // Both keys for the relation are required (e.g 'id' <-> 'user_id')
                         $relation = call_user_func([app($parentType->config['model']), $key]);
@@ -205,7 +216,7 @@ class SelectFields {
                         ? $fieldObject->config['alias']
                         : $key;
 
-                    self::addFieldToSelect($key, $select, $parentTable, false);
+                    self::addFieldToSelect($prefix . $key, $select, $parentTable, false);
 
                     self::addAlwaysFields($fieldObject, $select, $parentTable);
                 }
@@ -312,7 +323,7 @@ class SelectFields {
         }
         elseif( ! $forRelation && ! in_array($field, $select))
         {
-            $field = $parentTable ? ($parentTable . '.' . $field) : $field;
+//            $field = $parentTable ? ($parentTable . '.' . $field) : $field;
             if ( ! in_array($field, $select))
             {
                 $select[] = $field;
