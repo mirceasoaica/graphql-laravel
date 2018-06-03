@@ -161,6 +161,12 @@ class SelectFields {
                             continue;
                         }
 
+                        if(isset($fieldObject->config['alias'])) {
+                            self::addFieldToSelect($prefix . $fieldObject->config['alias'], $select, $parentTable, false);
+                            self::addAlwaysFields($fieldObject, $select, $parentTable);
+                            continue;
+                        }
+
                         // Get the next parent type, so that 'with' queries could be made
                         // Both keys for the relation are required (e.g 'id' <-> 'user_id')
                         $relation = call_user_func([app($parentType->config['model']), $key]);
