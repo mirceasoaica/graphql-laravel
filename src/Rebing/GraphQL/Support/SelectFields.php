@@ -155,15 +155,22 @@ class SelectFields {
                 {
                     if (isset($parentType->config['model']))
                     {
-                        if( ! method_exists($parentType->config['model'], $key)) {
-                            $name = $fieldObject->config['alias'] ?? $fieldObject->config['name'];
-                            static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
-                            continue;
-                        }
-
                         if(isset($fieldObject->config['alias'])) {
                             self::addFieldToSelect($prefix . $fieldObject->config['alias'], $select, $parentTable, false);
                             self::addAlwaysFields($fieldObject, $select, $parentTable);
+
+                            if(method_exists($parentType->config['model'], $key)) {
+                                // add the with
+                                $newParentType = $parentType->getField($key)->config['type'];
+                                $with[$key] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
+                            }
+
+                            continue;
+                        }
+
+                        if( ! method_exists($parentType->config['model'], $key)) {
+                            $name = $fieldObject->config['alias'] ?? $fieldObject->config['name'];
+                            static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
                             continue;
                         }
 
