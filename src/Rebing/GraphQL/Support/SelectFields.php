@@ -106,7 +106,7 @@ class SelectFields {
     {
         $parentTable = self::getTableNameFromParentType($parentType);
 
-        if($parentType instanceof NonNull) {
+        if($parentType instanceof NonNull || $parentType instanceof ListOfType) {
             return self::handleFields($requestedFields, $parentType->getWrappedType(), $select, $with, $prefix);
         }
 
@@ -169,7 +169,7 @@ class SelectFields {
                         }
 
                         if( ! method_exists($parentType->config['model'], $key)) {
-                            $name = $fieldObject->config['alias'] ?? $fieldObject->config['name'];
+                            $name = $fieldObject->config['name'];
                             static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
                             continue;
                         }
