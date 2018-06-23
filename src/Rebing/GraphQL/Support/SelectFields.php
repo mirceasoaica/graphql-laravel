@@ -114,7 +114,7 @@ class SelectFields
                     self::handleFields($field, $fieldObject->config['type']->getWrappedType(), $select, $with);
                     continue; // nothing to do here
                 }
-                
+
                 if (is_array($field)) {
                     if (isset($parentType->config['model'])) {
                         $customQuery = array_get($fieldObject->config, 'query');
@@ -126,7 +126,13 @@ class SelectFields
                         if (!method_exists($parentType->config['model'], $key)) {
                             $name = $fieldObject->config['name'];
                             static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
-
+                            if (isset($fieldObject->config['eager_load'])) {
+                                $newParentType = $parentType->getField($key)->config['type'];
+                                foreach ($fieldObject->config['eager_load'] as $load) {
+                                    $with[$load['relation']] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
+                                    self::addFieldToSelect($prefix . $load['foreignKey'], $select, false);
+                                }
+                            }
                             continue;
                         }
 
