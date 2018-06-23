@@ -114,13 +114,7 @@ class SelectFields
                     self::handleFields($field, $fieldObject->config['type']->getWrappedType(), $select, $with);
                     continue; // nothing to do here
                 }
-
-//                if (isset($parentType->config['always'])) {
-//                    foreach ($parentType->config['always'] as $field) {
-//                        self::addFieldToSelect($field, $select, false);
-//                    }
-//                }
-
+                
                 if (is_array($field)) {
                     if (isset($parentType->config['model'])) {
                         $customQuery = array_get($fieldObject->config, 'query');
@@ -157,7 +151,8 @@ class SelectFields
                             }
                         } // If 'HasMany', then add it in the 'with'
                         elseif (is_a($relation, HasMany::class) || is_a($relation, MorphMany::class) || is_a($relation, HasOne::class)) {
-                            $foreignKey = explode('.', $foreignKey)[2];
+                            $parts = explode('.', $foreignKey);
+                            $foreignKey = $parts[1] ?? $parts[0];
                             if (!array_key_exists($foreignKey, $field)) {
                                 $field[$foreignKey] = self::FOREIGN_KEY;
                             }
@@ -167,7 +162,7 @@ class SelectFields
                         $newParentType = $parentType->getField($key)->config['type'];
 
                         self::addAlwaysFields($fieldObject, $field, true);
-                        
+
                         $with[$key] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
                     } else {
                         self::handleFields($field, $fieldObject->config['type'], $select, $with);
@@ -201,7 +196,8 @@ class SelectFields
      * @return boolean | null - true, if selectable; false, if not selectable, but allowed;
      *                          null, if not allowed
      */
-    protected static function validateField($fieldObject)
+    protected
+    static function validateField($fieldObject)
     {
         $selectable = true;
 
@@ -237,7 +233,8 @@ class SelectFields
     /**
      * Add selects that are given by the 'always' attribute
      */
-    protected static function addAlwaysFields($fieldObject, array &$select, $forRelation = false)
+    protected
+    static function addAlwaysFields($fieldObject, array &$select, $forRelation = false)
     {
         if (isset($fieldObject->config['always'])) {
             $always = $fieldObject->config['always'];
@@ -253,7 +250,8 @@ class SelectFields
         }
     }
 
-    protected static function addFieldToSelect($field, &$select, $forRelation)
+    protected
+    static function addFieldToSelect($field, &$select, $forRelation)
     {
         if ($forRelation && !array_key_exists($field, $select)) {
             $select[$field] = true;
@@ -262,22 +260,26 @@ class SelectFields
         }
     }
 
-    private static function getPrimaryKeyFromParentType($parentType)
+    private
+    static function getPrimaryKeyFromParentType($parentType)
     {
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getKeyName() : null;
     }
 
-    private static function getTableNameFromParentType($parentType)
+    private
+    static function getTableNameFromParentType($parentType)
     {
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getTable() : null;
     }
 
-    public function getSelect()
+    public
+    function getSelect()
     {
         return $this->select;
     }
 
-    public function getRelations()
+    public
+    function getRelations()
     {
         return $this->relations;
     }
