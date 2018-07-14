@@ -101,6 +101,12 @@ class SelectFields
                 continue;
             }
 
+            // Always select foreign key
+            if ($field === self::FOREIGN_KEY) {
+                self::addFieldToSelect($key, $select, false);
+                continue;
+            }
+
             try {
                 $fieldObject = $parentType->getField($key);
             } catch (InvariantViolation $e) {
@@ -123,16 +129,21 @@ class SelectFields
                             self::addFieldToSelect($prefix . $fieldObject->config['alias'], $select, false);
                         }
 
+                        if (isset($fieldObject->config['eager_load'])) {
+                            $newParentType = $parentType->getField($key)->config['type'];
+                            foreach ($fieldObject->config['eager_load'] as $load) {
+                                if (isset($load['referenceKey'])) {
+                                    $field[$load['referenceKey']] = true;
+                                }
+
+                                $with[$load['relation']] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
+                                self::addFieldToSelect($prefix . $load['foreignKey'], $select, false);
+                            }
+                        }
+
                         if (!method_exists($parentType->config['model'], $key)) {
                             $name = $fieldObject->config['name'];
                             static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
-                            if (isset($fieldObject->config['eager_load'])) {
-                                $newParentType = $parentType->getField($key)->config['type'];
-                                foreach ($fieldObject->config['eager_load'] as $load) {
-                                    $with[$load['relation']] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
-                                    self::addFieldToSelect($prefix . $load['foreignKey'], $select, false);
-                                }
-                            }
                             continue;
                         }
 
@@ -202,8 +213,7 @@ class SelectFields
      * @return boolean | null - true, if selectable; false, if not selectable, but allowed;
      *                          null, if not allowed
      */
-    protected
-    static function validateField($fieldObject)
+    protected static function validateField($fieldObject)
     {
         $selectable = true;
 
@@ -239,8 +249,7 @@ class SelectFields
     /**
      * Add selects that are given by the 'always' attribute
      */
-    protected
-    static function addAlwaysFields($fieldObject, array &$select, $forRelation = false)
+    protected static function addAlwaysFields($fieldObject, array &$select, $forRelation = false)
     {
         if (isset($fieldObject->config['always'])) {
             $always = $fieldObject->config['always'];
@@ -256,8 +265,7 @@ class SelectFields
         }
     }
 
-    protected
-    static function addFieldToSelect($field, &$select, $forRelation)
+    protected static function addFieldToSelect($field, &$select, $forRelation)
     {
         if ($forRelation && !array_key_exists($field, $select)) {
             $select[$field] = true;
@@ -266,26 +274,22 @@ class SelectFields
         }
     }
 
-    private
-    static function getPrimaryKeyFromParentType($parentType)
+    private static function getPrimaryKeyFromParentType($parentType)
     {
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getKeyName() : null;
     }
 
-    private
-    static function getTableNameFromParentType($parentType)
+    private static function getTableNameFromParentType($parentType)
     {
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getTable() : null;
     }
 
-    public
-    function getSelect()
+    public function getSelect()
     {
         return $this->select;
     }
 
-    public
-    function getRelations()
+    public function getRelations()
     {
         return $this->relations;
     }
