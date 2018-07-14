@@ -66,7 +66,7 @@ class SelectFields
         $primaryKey = self::getPrimaryKeyFromParentType($parentType);
 
         self::handleFields($requestedFields, $parentType, $select, $with);
-
+        
         // If a primary key is given, but not in the selects, add it
         if (!is_null($primaryKey)) {
 
@@ -74,7 +74,7 @@ class SelectFields
                 $select[] = $primaryKey;
             }
         }
-
+        
         if ($topLevel) {
             return [$select, $with];
         } else {
@@ -110,9 +110,9 @@ class SelectFields
             try {
                 $fieldObject = $parentType->getField($key);
             } catch (InvariantViolation $e) {
-                continue;
+                self::addFieldToSelect($prefix . $key, $select, false);
             }
-
+            
             $canSelect = self::validateField($fieldObject);
             if ($canSelect) { // field can be selected
                 // Pagination
@@ -174,12 +174,12 @@ class SelectFields
                                 $field[$foreignKey] = self::FOREIGN_KEY;
                             }
                         }
-
+                           
                         // New parent type, which is the relation
                         $newParentType = $parentType->getField($key)->config['type'];
-
+                           
                         self::addAlwaysFields($fieldObject, $field, true);
-
+                           
                         $with[$key] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
                     } else {
                         self::handleFields($field, $fieldObject->config['type'], $select, $with);
@@ -204,6 +204,7 @@ class SelectFields
                 self::addAlwaysFields($fieldObject, $select);
             }
         }
+        
 
     }
 
