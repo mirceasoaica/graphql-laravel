@@ -32,6 +32,7 @@ class SelectFields
             self::$args = $args;
 
             self::handleSelectFields($info->getFieldSelection(5), $parentType);
+//            dd(self::$select);
         }
     }
 
@@ -76,12 +77,12 @@ class SelectFields
                 if (is_array($field)) {
                     if (isset($parentType->config['model'])) {
                         // there is no relation to handle.
-                        if (!method_exists($parentType->config['model'], $key)) {
+                        if (!method_exists($parentType->config['model'], $fieldName)) {
                             // add the fields as a subselect to the current record
                             static::handleSelectFields($field, $fieldObject->getType(), $nest, $fieldPrefix);
                         } else {
                             // add fields required for the relation
-                            self::handleRelation($fieldObject, $key, $parentType, $nest);
+                            self::handleRelation($fieldObject, $fieldName, $parentType, $nest);
                             // add fields to the new nest level
                             self::handleSelectFields($field, $fieldObject->config['type'], $fieldNest, '');
                         }
