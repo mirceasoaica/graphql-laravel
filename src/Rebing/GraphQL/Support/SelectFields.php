@@ -2,29 +2,22 @@
 
 namespace Rebing\GraphQL\Support;
 
-use App\Elasticsearch\Relations\HasManyMultipleColumns;
-use Closure;
 use GraphQL\Error\InvariantViolation;
-use GraphQL\Type\Definition\InterfaceType;
-use GraphQL\Type\Definition\ListOfType;
-use GraphQL\Type\Definition\NonNull;
 use GraphQL\Type\Definition\ResolveInfo;
-use GraphQL\Type\Definition\UnionType;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
+use GraphQL\Type\Definition\WrappingType;
 
 class SelectFields
 {
 
     /** @var array */
     private static $args = [];
+
     /** @var array */
     private static $select = [];
+
     /** @var array */
     private static $customQueries = [];
+
     /** @var array */
     private static $privacyValidations = [];
 
@@ -38,33 +31,13 @@ class SelectFields
         if (!is_null($info->fieldNodes[0]->selectionSet)) {
             self::$args = $args;
 
-            self::getSelectableFieldsAndRelations($info->getFieldSelection(5), $parentType);
+            self::handleSelectFields($info->getFieldSelection(5), $parentType);
         }
     }
 
-    /**
-     * Retrieve the fields (top level) and relations that
-     * will be selected with the query
-     *
-     * @return array | Closure - if first recursion, return an array,
-     *      where the first key is 'select' array and second is 'with' array.
-     *      On other recursions return a closure that will be used in with
-     */
-    public static function getSelectableFieldsAndRelations(array $requestedFields, $parentType, $nest = '', $prefix = '')
+    protected static function handleSelectFields(array $requestedFields, $parentType, string $nest = '', string $prefix = '')
     {
-        $select = [];
-        $with = [];
-
-        if (is_a($parentType, ListOfType::class)) {
-            $parentType = $parentType->getWrappedType();
-        }
-
-        self::handleSelectFields($requestedFields, $parentType, $nest, $prefix);
-    }
-
-    protected static function handleSelectFields(array $requestedFields, $parentType, string $nest, string $prefix)
-    {
-        if ($parentType instanceof NonNull || $parentType instanceof ListOfType || $parentType instanceof PaginationType) {
+        if ($parentType instanceof WrappingType) {
             // get the wrapped type and process that one
             return self::handleSelectFields($requestedFields, $parentType->getWrappedType(), $nest, $prefix);
         }
@@ -79,14 +52,22 @@ class SelectFields
                 $fieldObject = $parentType->getField($key);
             } catch (InvariantViolation $e) {
                 self::addFieldToSelect($key, $prefix, $nest);
+                continue;
             }
 
             $canSelect = self::validateField($fieldObject);
             $fieldName = self::getFieldName($fieldObject);
-            // create the new Nest path to select the fields for current field
-            $fieldNest = trim($nest . '.' . $fieldName, '.');
-            // create the new prefix for current field
-            $fieldPrefix = $prefix . $fieldName . '.';
+
+            $fieldNest = $nest;
+            $fieldPrefix = $prefix;
+            if (!$parentType instanceof PaginationType) {
+                // append the current Fieldname only if type is not pagination
+
+                // create the new prefix for current field
+                $fieldPrefix = $prefix . $fieldName . '.';
+                // create the new Nest path to select the fields for current field
+                $fieldNest = trim($nest . '.' . $fieldName, '.');
+            }
 
             // add all fields from eager_load relations
             self::handleEagerLoad($fieldObject, $fieldNest);
@@ -107,11 +88,9 @@ class SelectFields
                     } else {
                         self::handleSelectFields($field, $fieldObject->config['type'], $nest, $fieldPrefix);
                     }
-
                 } else {
                     self::addFieldToSelect($fieldObject, $prefix, $nest);
                 }
-
             } elseif ($canSelect === null) {
                 $fieldObject->resolveFn = function () {
                     return null;
@@ -230,6 +209,7 @@ class SelectFields
             foreach ($field as $f) {
                 self::addFieldToSelect($f, $prefix, $nest);
             }
+
             return;
         }
 
@@ -264,20 +244,26 @@ class SelectFields
         return $fieldObject->config['name'];
     }
 
-    private static function getPrimaryKeyFromParentType($parentType)
+    private
+    static function getPrimaryKeyFromParentType($parentType)
     {
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getKeyName() : null;
     }
 
-    public function getSelect($items = null)
+    public
+    function getSelect($items = null)
     {
         if (!$items) {
             $items = self::$select;
         }
 
-        return collect($items)->filter(function ($item) {
-            return !is_array($item);
-        })->keys()->all();
+        return collect($items)
+            ->filter(function ($item) {
+                return !is_array($item);
+            })
+            ->keys()
+            ->all()
+            ;
     }
 
     public function getRelations($items = false, $customQueries = false)
@@ -301,6 +287,7 @@ class SelectFields
                 };
             }
         }
+
         return $relations;
     }
 
