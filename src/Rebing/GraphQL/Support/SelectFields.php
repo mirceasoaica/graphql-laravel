@@ -2,6 +2,7 @@
 
 namespace Rebing\GraphQL\Support;
 
+use App\Elasticsearch\Relations\HasManyMultipleColumns;
 use Closure;
 use GraphQL\Error\InvariantViolation;
 use GraphQL\Type\Definition\InterfaceType;
@@ -21,13 +22,11 @@ class SelectFields
     /** @var array */
     private static $args = [];
     /** @var array */
-    private $select = [];
+    private static $select = [];
     /** @var array */
-    private $relations = [];
+    private static $customQueries = [];
     /** @var array */
     private static $privacyValidations = [];
-
-    const FOREIGN_KEY = 'foreignKey';
 
     /**
      * @param ResolveInfo $info
@@ -39,10 +38,7 @@ class SelectFields
         if (!is_null($info->fieldNodes[0]->selectionSet)) {
             self::$args = $args;
 
-            $fields = self::getSelectableFieldsAndRelations($info->getFieldSelection(5), $parentType);
-
-            $this->select = $fields[0];
-            $this->relations = $fields[1];
+            self::getSelectableFieldsAndRelations($info->getFieldSelection(5), $parentType);
         }
     }
 
@@ -54,7 +50,7 @@ class SelectFields
      *      where the first key is 'select' array and second is 'with' array.
      *      On other recursions return a closure that will be used in with
      */
-    public static function getSelectableFieldsAndRelations(array $requestedFields, $parentType, $customQuery = null, $topLevel = true)
+    public static function getSelectableFieldsAndRelations(array $requestedFields, $parentType, $nest = '', $prefix = '')
     {
         $select = [];
         $with = [];
@@ -62,37 +58,15 @@ class SelectFields
         if (is_a($parentType, ListOfType::class)) {
             $parentType = $parentType->getWrappedType();
         }
-        self::getTableNameFromParentType($parentType);
-        $primaryKey = self::getPrimaryKeyFromParentType($parentType);
 
-        self::handleFields($requestedFields, $parentType, $select, $with);
-
-        // If a primary key is given, but not in the selects, add it
-        if (!is_null($primaryKey)) {
-
-            if (!in_array($primaryKey, $select)) {
-                $select[] = $primaryKey;
-            }
-        }
-
-        if ($topLevel) {
-            return [$select, $with];
-        } else {
-            return function ($query) use ($with, $select, $customQuery) {
-                if ($customQuery) {
-                    $query = $customQuery(self::$args, $query);
-                }
-
-                $query->select($select);
-                $query->with($with);
-            };
-        }
+        self::handleSelectFields($requestedFields, $parentType, $nest, $prefix);
     }
 
-    protected static function handleFields(array $requestedFields, $parentType, array &$select, array &$with, $prefix = '')
+    protected static function handleSelectFields(array $requestedFields, $parentType, string $nest, string $prefix)
     {
-        if ($parentType instanceof NonNull || $parentType instanceof ListOfType) {
-            return self::handleFields($requestedFields, $parentType->getWrappedType(), $select, $with, $prefix);
+        if ($parentType instanceof NonNull || $parentType instanceof ListOfType || $parentType instanceof PaginationType) {
+            // get the wrapped type and process that one
+            return self::handleSelectFields($requestedFields, $parentType->getWrappedType(), $nest, $prefix);
         }
 
         foreach ($requestedFields as $key => $field) {
@@ -101,114 +75,36 @@ class SelectFields
                 continue;
             }
 
-            // Always select foreign key
-            if ($field === self::FOREIGN_KEY) {
-                self::addFieldToSelect($key, $select, false);
-                continue;
-            }
-
             try {
                 $fieldObject = $parentType->getField($key);
             } catch (InvariantViolation $e) {
-                self::addFieldToSelect($prefix . $key, $select, false);
+                self::addFieldToSelect($key, $prefix, $nest);
             }
 
             $canSelect = self::validateField($fieldObject);
-            if ($canSelect) { // field can be selected
-                // Pagination
-                if (is_a($parentType, PaginationType::class)) {
-                    self::handleFields($field, $fieldObject->config['type']->getWrappedType(), $select, $with);
-                    continue; // nothing to do here
-                }
+            $fieldName = self::getFieldName($fieldObject);
 
+            self::handleEagerLoad($fieldObject, trim($nest . '.' . $fieldName, '.'));
+
+            if ($canSelect) { // field can be selected
                 if (is_array($field)) {
                     if (isset($parentType->config['model'])) {
-                        $customQuery = array_get($fieldObject->config, 'query');
-
-                        if (isset($fieldObject->config['alias'])) {
-                            self::addFieldToSelect($prefix . $fieldObject->config['alias'], $select, false);
-                        }
-
-                        if (isset($fieldObject->config['eager_load'])) {
-                            $npt = $parentType->getField($key)->config['type'];
-                            foreach ($fieldObject->config['eager_load'] as $load) {
-                                if (isset($load['select'])) {
-                                    if (is_array($load['select'])) {
-                                        foreach ($load['select'] as $f) {
-                                            $field[$f] = self::FOREIGN_KEY;
-                                        }
-                                    } else {
-                                        $field[$load['select']] = self::FOREIGN_KEY;
-                                    }
-                                }
-
-                                $with[$load['relation']] = self::getSelectableFieldsAndRelations($field, $npt, $customQuery, false);
-                                self::addFieldToSelect($prefix . $load['foreignKey'], $select, false);
-                            }
-                        }
-
                         if (!method_exists($parentType->config['model'], $key)) {
-                            $name = $fieldObject->config['name'];
-                            static::handleFields($field, $fieldObject->getType(), $select, $with, $prefix . $name . '.');
+                            static::handleSelectFields($field, $fieldObject->getType(), $nest, $prefix . $fieldName . '.');
                             continue;
                         }
 
-                        // Get the next parent type, so that 'with' queries could be made
-                        // Both keys for the relation are required (e.g 'id' <-> 'user_id')
-                        $relation = call_user_func([app($parentType->config['model']), $key]);
-                        // Add the foreign key here, if it's a 'belongsTo'/'belongsToMany' relation
-                        if (method_exists($relation, 'getForeignKey')) {
-                            $foreignKey = $relation->getForeignKey();
-                        } else {
-                            if (method_exists($relation, 'getQualifiedForeignPivotKeyName')) {
-                                $foreignKey = $relation->getQualifiedForeignPivotKeyName();
-                            } else {
-                                $foreignKey = $relation->getQualifiedForeignKeyName();
-                            }
-                        }
+                        $newNesting = trim($nest . '.' . $fieldName, '.');
 
+                        self::handleRelation($fieldObject, $key, $parentType, $nest);
 
-                        if (is_a($relation, BelongsTo::class) || is_a($relation, MorphTo::class)) {
-                            if (!in_array($foreignKey, $select)) {
-                                $select[] = $foreignKey;
-                            }
-                        } // If 'HasMany', then add it in the 'with'
-                        elseif (is_a($relation, HasMany::class) || is_a($relation, MorphMany::class) || is_a($relation, HasOne::class)) {
-                            $parts = explode('.', $foreignKey);
-                            $foreignKey = $parts[1] ?? $parts[0];
-                            if (!array_key_exists($foreignKey, $field)) {
-                                $field[$foreignKey] = self::FOREIGN_KEY;
-                            }
-                        }
-
-                        // New parent type, which is the relation
-                        $newParentType = $parentType->getField($key)->config['type'];
-
-                        if (isset($fieldObject->config['select'])) {
-                            if (is_array($fieldObject->config['select'])) {
-                                foreach ($fieldObject->config['select'] as $f) {
-                                    $field[$f] = self::FOREIGN_KEY;
-                                }
-                            } else {
-                                $field[$fieldObject->config['select']] = self::FOREIGN_KEY;
-                            }
-                        }
-
-                        self::addAlwaysFields($fieldObject, $field, true);
-
-                        $with[$key] = self::getSelectableFieldsAndRelations($field, $newParentType, $customQuery, false);
+                        self::handleSelectFields($field, $fieldObject->config['type'], $newNesting, '');
                     } else {
-                        self::handleFields($field, $fieldObject->config['type'], $select, $with);
+                        self::handleSelectFields($field, $fieldObject->config['type'], $nest, $prefix);
                     }
 
                 } else {
-                    $key = isset($fieldObject->config['alias'])
-                        ? $fieldObject->config['alias']
-                        : $key;
-
-                    self::addFieldToSelect($prefix . $key, $select, false);
-
-                    self::addAlwaysFields($fieldObject, $select);
+                    self::addFieldToSelect($fieldObject, $prefix, $nest);
                 }
 
             } elseif ($canSelect === null) {
@@ -217,11 +113,90 @@ class SelectFields
                 };
             } // If allowed field, but not selectable
             elseif ($canSelect === false) {
-                self::addAlwaysFields($fieldObject, $select);
+                self::addFieldToSelect($fieldObject, $prefix, $nest, false);
+            }
+        }
+    }
+
+    protected static function handleRelation($fieldObject, $relationName, $parentType, $nest)
+    {
+        $customQuery = array_get($fieldObject->config, 'query');
+
+        $fieldName = self::getFieldName($fieldObject);
+        $newNesting = trim($nest . '.' . $fieldName, '.');
+
+        // Get the next parent type, so that 'with' queries could be made
+        // Both keys for the relation are required (e.g 'id' <-> 'user_id')
+        $relation = call_user_func([app($parentType->config['model']), $relationName]);
+
+        // Add the foreign key here, if it's a 'belongsTo'/'belongsToMany' relation
+        if (method_exists($relation, 'getForeignKey')) {
+            $foreignKey = $relation->getForeignKey();
+        } else {
+            if (method_exists($relation, 'getQualifiedForeignPivotKeyName')) {
+                $foreignKey = $relation->getQualifiedForeignPivotKeyName();
+            } else {
+                $foreignKey = $relation->getQualifiedForeignKeyName();
             }
         }
 
+        if (!is_array($foreignKey)) {
+            $foreignKey = [$foreignKey];
+        }
 
+        foreach ($foreignKey as $fKey) {
+            self::addFieldToSelect(self::removeTableTame($fKey), '', $nest);
+        }
+
+        // get local keys
+        $localKeys = [];
+        if (method_exists($relation, 'getQualifiedParentKeyName')) {
+            $localKeys = $relation->getQualifiedParentKeyName();
+        } elseif (method_exists($relation, 'getQualifiedOwnerKeyName')) {
+            $localKeys = $relation->getQualifiedOwnerKeyName();
+        }
+
+        if (!is_array($localKeys)) {
+            $localKeys = [$localKeys];
+        }
+
+        foreach ($localKeys as $lKey) {
+            self::addFieldToSelect($self::removeTableTame($lKey), '', $newNesting);
+        }
+
+        // add relation query
+        self::addRelationCustomQuery($nest, $fieldObject);
+    }
+
+    protected static function handleEagerLoad($fieldObject, $nest)
+    {
+        if (isset($fieldObject->config['eager_load'])) {
+            foreach ($fieldObject->config['eager_load'] as $eager) {
+                // add select fields
+                $foreignNest = trim($nest . '.' . $eager['relation'], '.');
+
+                self::addFieldToSelect(data_get($eager, 'select', []), '', $foreignNest);
+                // add local keys
+                $parts = explode('.', $foreignNest);
+                unset($parts[count($parts) - 1]);
+                $newNest = implode('.', $parts);
+
+                // add foreign keys
+                self::addFieldToSelect($eager['foreignKey'], '', $newNest);
+            }
+        }
+    }
+
+    protected static function addRelationCustomQuery($nest, $fieldObject)
+    {
+        $customQuery = array_get($fieldObject->config, 'query');
+        if ($customQuery) {
+            if (!$nest) {
+                self::$customQueries['customQuery'] = $customQuery;
+            } else {
+                data_set(self::$customQueries, $nest . '.customQuery', $customQuery);
+            }
+        }
     }
 
     /**
@@ -263,32 +238,51 @@ class SelectFields
         return $selectable;
     }
 
-    /**
-     * Add selects that are given by the 'always' attribute
-     */
-    protected static function addAlwaysFields($fieldObject, array &$select, $forRelation = false)
+    protected static function addFieldToSelect($field, $prefix, $nest, $selectable = true)
     {
-        if (isset($fieldObject->config['always'])) {
-            $always = $fieldObject->config['always'];
-
-            if (is_string($always)) {
-                $always = explode(',', $always);
+        if (is_object($field)) {
+            if (isset($field->config['select'])) {
+                $select = is_array($field->config['name']) ? $field->config['name'] : [$field->config['name']];
+                foreach ($select as $f) {
+                    self::addFieldToSelect($f, '', $nest);
+                }
             }
+        } elseif (is_array($field)) {
+            foreach ($field as $f) {
+                self::addFieldToSelect($f, $prefix, $nest);
+            }
+            return;
+        }
 
-            // Get as 'field' => true
-            foreach ($always as $field) {
-                self::addFieldToSelect($field, $select, $forRelation);
+        if (!$field) {
+            return;
+        }
+
+        if ($selectable) {
+            $fieldName = self::getFieldName($field);
+
+            if (!$nest) {
+                self::$select[$prefix . $fieldName] = true;
+            } else {
+                $nestValue = data_get(self::$select, $nest, []);
+                $nestValue[$prefix . $fieldName] = true;
+
+                data_set(self::$select, $nest, $nestValue);
             }
         }
     }
 
-    protected static function addFieldToSelect($field, &$select, $forRelation)
+    protected static function getFieldName($fieldObject)
     {
-        if ($forRelation && !array_key_exists($field, $select)) {
-            $select[$field] = true;
-        } elseif (!$forRelation && !in_array($field, $select)) {
-            $select[] = $field;
+        if (is_string($fieldObject)) {
+            return $fieldObject;
         }
+
+        if (isset($fieldObject->config['alias'])) {
+            return $fieldObject->config['alias'];
+        }
+
+        return $fieldObject->config['name'];
     }
 
     private static function getPrimaryKeyFromParentType($parentType)
@@ -296,19 +290,41 @@ class SelectFields
         return isset($parentType->config['model']) ? app($parentType->config['model'])->getKeyName() : null;
     }
 
-    private static function getTableNameFromParentType($parentType)
+    public function getSelect($items = null)
     {
-        return isset($parentType->config['model']) ? app($parentType->config['model'])->getTable() : null;
+        if (!$items) {
+            $items = self::$select;
+        }
+
+        return collect($items)->filter(function ($item) {
+            return !is_array($item);
+        })->keys()->all();
     }
 
-    public function getSelect()
+    public function getRelations($items = null)
     {
-        return $this->select;
+        $relations = [];
+        if (!$items) {
+            $items = self::$select;
+        }
+        $that = $this;
+        $args = self::$args;
+        foreach ($items as $key => $item) {
+            if (is_array($item)) {
+                $relations[$key] = function ($query) use ($that, $args, $item) {
+                    $query->select($that->getSelect($item));
+                    $query->with($that->getRelations($item));
+                };
+            }
+        }
+        return $relations;
     }
 
-    public function getRelations()
+    private static function removeTableTame($name) 
     {
-        return $this->relations;
+        $parts = explode('.', $name);
+        
+        return $parts[1] ?? $parts[0];
     }
 
 }
