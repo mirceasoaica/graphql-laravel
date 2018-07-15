@@ -83,24 +83,29 @@ class SelectFields
 
             $canSelect = self::validateField($fieldObject);
             $fieldName = self::getFieldName($fieldObject);
+            // create the new Nest path to select the fields for current field
+            $fieldNest = trim($nest . '.' . $fieldName, '.');
+            // create the new prefix for current field
+            $fieldPrefix = $prefix . $fieldName . '.';
 
-            self::handleEagerLoad($fieldObject, trim($nest . '.' . $fieldName, '.'));
+            // add all fields from eager_load relations
+            self::handleEagerLoad($fieldObject, $fieldNest);
 
             if ($canSelect) { // field can be selected
                 if (is_array($field)) {
                     if (isset($parentType->config['model'])) {
+                        // there is no relation to handle.
                         if (!method_exists($parentType->config['model'], $key)) {
-                            static::handleSelectFields($field, $fieldObject->getType(), $nest, $prefix . $fieldName . '.');
-                            continue;
+                            // add the fields as a subselect to the current record
+                            static::handleSelectFields($field, $fieldObject->getType(), $nest, $fieldPrefix);
+                        } else {
+                            // add fields required for the relation
+                            self::handleRelation($fieldObject, $key, $parentType, $nest);
+                            // add fields to the new nest level
+                            self::handleSelectFields($field, $fieldObject->config['type'], $fieldNest, '');
                         }
-
-                        $newNesting = trim($nest . '.' . $fieldName, '.');
-
-                        self::handleRelation($fieldObject, $key, $parentType, $nest);
-
-                        self::handleSelectFields($field, $fieldObject->config['type'], $newNesting, '');
                     } else {
-                        self::handleSelectFields($field, $fieldObject->config['type'], $nest, $prefix);
+                        self::handleSelectFields($field, $fieldObject->config['type'], $nest, $fieldPrefix);
                     }
 
                 } else {
@@ -129,39 +134,16 @@ class SelectFields
         // Both keys for the relation are required (e.g 'id' <-> 'user_id')
         $relation = call_user_func([app($parentType->config['model']), $relationName]);
 
-        // Add the foreign key here, if it's a 'belongsTo'/'belongsToMany' relation
-        if (method_exists($relation, 'getForeignKey')) {
-            $foreignKey = $relation->getForeignKey();
-        } else {
-            if (method_exists($relation, 'getQualifiedForeignPivotKeyName')) {
-                $foreignKey = $relation->getQualifiedForeignPivotKeyName();
-            } else {
-                $foreignKey = $relation->getQualifiedForeignKeyName();
-            }
-        }
-
-        if (!is_array($foreignKey)) {
-            $foreignKey = [$foreignKey];
-        }
-
+        // get the foreign keys
+        $foreignKey = self::getForeignKeys($relation);
         foreach ($foreignKey as $fKey) {
             self::addFieldToSelect(self::removeTableTame($fKey), '', $nest);
         }
 
         // get local keys
-        $localKeys = [];
-        if (method_exists($relation, 'getQualifiedParentKeyName')) {
-            $localKeys = $relation->getQualifiedParentKeyName();
-        } elseif (method_exists($relation, 'getQualifiedOwnerKeyName')) {
-            $localKeys = $relation->getQualifiedOwnerKeyName();
-        }
-
-        if (!is_array($localKeys)) {
-            $localKeys = [$localKeys];
-        }
-
+        $localKeys = self::getLocalKeys($relation);
         foreach ($localKeys as $lKey) {
-            self::addFieldToSelect($self::removeTableTame($lKey), '', $newNesting);
+            self::addFieldToSelect(self::removeTableTame($lKey), '', $newNesting);
         }
 
         // add relation query
@@ -191,11 +173,8 @@ class SelectFields
     {
         $customQuery = array_get($fieldObject->config, 'query');
         if ($customQuery) {
-            if (!$nest) {
-                self::$customQueries['customQuery'] = $customQuery;
-            } else {
-                data_set(self::$customQueries, $nest . '.customQuery', $customQuery);
-            }
+            $newNest = trim($nest . '.' . self::getFieldName($fieldObject) . '.customQuery', '.');
+            data_set(self::$customQueries, $newNest, $customQuery);
         }
     }
 
@@ -301,30 +280,70 @@ class SelectFields
         })->keys()->all();
     }
 
-    public function getRelations($items = null)
+    public function getRelations($items = false, $customQueries = false)
     {
         $relations = [];
-        if (!$items) {
+        if ($items === false && $customQueries === false) {
             $items = self::$select;
+            $customQueries = self::$customQueries;
         }
         $that = $this;
         $args = self::$args;
         foreach ($items as $key => $item) {
             if (is_array($item)) {
-                $relations[$key] = function ($query) use ($that, $args, $item) {
+                $customQuery = $customQueries[$key] ?? null;
+                $relations[$key] = function ($query) use ($that, $args, $item, $customQuery) {
+                    if ($customQuery && isset($customQuery['customQuery'])) {
+                        $query = $customQuery['customQuery']($args, $query);
+                    }
+                    $query->with($that->getRelations($item, $customQuery));
                     $query->select($that->getSelect($item));
-                    $query->with($that->getRelations($item));
                 };
             }
         }
         return $relations;
     }
 
-    private static function removeTableTame($name) 
+    private static function removeTableTame($name)
     {
         $parts = explode('.', $name);
-        
+
         return $parts[1] ?? $parts[0];
     }
 
+    private static function getLocalKeys($relation)
+    {
+        if (method_exists($relation, 'getQualifiedParentKeyName')) {
+            $localKeys = $relation->getQualifiedParentKeyName();
+        } elseif (method_exists($relation, 'getQualifiedOwnerKeyName')) {
+            $localKeys = $relation->getQualifiedOwnerKeyName();
+        }
+
+        // make the local key an array
+        if (!is_array($localKeys)) {
+            $localKeys = [$localKeys];
+        }
+
+        return $localKeys;
+    }
+
+    private static function getForeignKeys($relation)
+    {
+        // Add the foreign key here, if it's a 'belongsTo'/'belongsToMany' relation
+        if (method_exists($relation, 'getForeignKey')) {
+            $foreignKey = $relation->getForeignKey();
+        } else {
+            if (method_exists($relation, 'getQualifiedForeignPivotKeyName')) {
+                $foreignKey = $relation->getQualifiedForeignPivotKeyName();
+            } else {
+                $foreignKey = $relation->getQualifiedForeignKeyName();
+            }
+        }
+
+        if (!is_array($foreignKey)) {
+            $foreignKey = [$foreignKey];
+        }
+
+        return $foreignKey;
+    }
 }
