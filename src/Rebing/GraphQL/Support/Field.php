@@ -151,7 +151,7 @@ class Field extends Fluent {
             $args = array_get($arguments, 1, []);
             if(method_exists($this, 'load')) 
             {
-                call_user_func([$this, 'load'], $args)
+                call_user_func([$this, 'load'], $args);
             }
 
             // Validate mutation arguments
