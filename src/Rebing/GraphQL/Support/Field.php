@@ -148,10 +148,15 @@ class Field extends Fluent {
                 throw with(new AuthorizationError('Unauthorized'));
             }
 
+            $args = array_get($arguments, 1, []);
+            if(method_exists($this, 'load')) 
+            {
+                call_user_func([$this, 'load'], $args)
+            }
+
             // Validate mutation arguments
             if(method_exists($this, 'getRules'))
             {
-                $args = array_get($arguments, 1, []);
                 $rules = call_user_func_array([$this, 'getRules'], [$args]);
                 if(sizeof($rules))
                 {
