@@ -211,6 +211,7 @@ class GraphQL {
             } else {
                 $name = is_numeric($name) ? $field['name']:$name;
                 $field['name'] = $name;
+                $field = $field->toArray();
             }
             $typeFields[$name] = $field;
         }
