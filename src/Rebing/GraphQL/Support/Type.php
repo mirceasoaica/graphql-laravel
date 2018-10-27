@@ -13,9 +13,9 @@ class Type extends Fluent {
     
     protected static $instances = [];
     
-    protected $inputObject = false;
-    protected $enumObject = false;
-    protected $unionType = false;
+    public $inputObject = false;
+    public $enumObject = false;
+    public $unionType = false;
 
     public function attributes()
     {
