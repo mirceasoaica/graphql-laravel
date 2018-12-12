@@ -41,14 +41,14 @@ class Field extends Fluent {
         return [];
     }
 
-    public function getRules()
+    public function getRules($arguments = [])
     {
-        $arguments = func_get_args();
-
         $rules = call_user_func_array([$this, 'rules'], $arguments);
         $argsRules = [];
-        foreach($this->args() as $name => $arg)
+        foreach($this->args() as $key => $arg)
         {
+            $name = is_numeric($key) ? $arg['name'] : $name;
+
             if(isset($arg['rules']))
             {
                 if(is_callable($arg['rules']))
@@ -61,8 +61,8 @@ class Field extends Fluent {
                 }
             }
 
-            if (isset($arg['type'])) {
-                $argsRules = array_merge($argsRules, $this->inferRulesFromType($arg['type'], $name, $arguments));
+            if (isset($arg['type']) && isset($arguments[$name])) {
+                $argsRules = array_merge($argsRules, $this->inferRulesFromType($arg['type'], $name, $arguments[$name]));
             }
         }
 
@@ -109,15 +109,16 @@ class Field extends Fluent {
 
         foreach ($input->getFields() as $name => $field) {
             $key = "{$prefix}.{$name}";
-
             // get any explicitly set rules
             if (isset($field->rules)) {
                 $rules[$key] = $this->resolveRules($field->rules, $resolutionArguments);
             }
-
-            // then recursively call the parent method to see if this is an
-            // input object, passing in the new prefix
-            $rules = array_merge($rules, $this->inferRulesFromType($field->type, $key, $resolutionArguments));
+            
+            if(isset($resolutionArguments[$name])) {
+                // then recursively call the parent method to see if this is an
+                // input object, passing in the new prefix
+                $rules = array_merge($rules, $this->inferRulesFromType($field->type, $key, $resolutionArguments[$name]));
+            }
         }
 
         return $rules;
