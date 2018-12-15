@@ -43,7 +43,7 @@ class Field extends Fluent {
 
     public function getRules($arguments = [])
     {
-        $rules = call_user_func_array([$this, 'rules'], $arguments);
+        $rules = call_user_func_array([$this, 'rules'], [$arguments]);
         $argsRules = [];
         foreach($this->args() as $key => $arg)
         {
