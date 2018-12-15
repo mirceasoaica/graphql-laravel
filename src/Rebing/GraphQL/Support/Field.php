@@ -47,7 +47,7 @@ class Field extends Fluent {
         $argsRules = [];
         foreach($this->args() as $key => $arg)
         {
-            $name = is_numeric($key) ? $arg['name'] : $name;
+            $name = $key;
 
             if(isset($arg['rules']))
             {
