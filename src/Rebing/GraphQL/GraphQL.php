@@ -8,6 +8,7 @@ use GraphQL\Type\Definition\ObjectType;
 use Rebing\GraphQL\Events\SchemaAdded;
 use Rebing\GraphQL\Exception\SchemaNotFound;
 use Rebing\GraphQL\Support\PaginationType;
+use GraphQL\Type\Definition\Type;
 use Session;
 
 class GraphQL {
@@ -155,7 +156,12 @@ class GraphQL {
             $type = app($type);
         }
 
-        $instance = $type->toType();
+        if($type instanceof Type) {
+            $instance = $type;
+        } else {
+            $instance = $type->toType();
+        }
+
         $this->typesInstances[$name] = $instance;
 
         return $instance;
