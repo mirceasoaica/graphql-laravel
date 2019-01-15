@@ -28,6 +28,8 @@ class SelectFields
      */
     public function __construct(ResolveInfo $info, $parentType, array $args)
     {
+        self::$select = [];
+        
         if (!is_null($info->fieldNodes[0]->selectionSet)) {
             self::$args = $args;
 
