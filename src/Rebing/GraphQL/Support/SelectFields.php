@@ -119,13 +119,13 @@ class SelectFields
         // get the foreign keys
         $foreignKey = self::getForeignKeys($relation);
         foreach ($foreignKey as $fKey) {
-            self::addFieldToSelect(self::removeTableTame($fKey), '', $newNesting);
+            self::addFieldToSelect(self::removeTableTame($fKey), '', $nest);
         }
 
         // get local keys
         $localKeys = self::getLocalKeys($relation);
         foreach ($localKeys as $lKey) {
-            self::addFieldToSelect(self::removeTableTame($lKey), '', $nest);
+            self::addFieldToSelect(self::removeTableTame($lKey), '', $newNesting);
         }
 
         // add relation query
