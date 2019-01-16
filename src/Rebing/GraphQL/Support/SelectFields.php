@@ -319,13 +319,14 @@ class SelectFields
 
     private static function getForeignKeys($relation)
     {
+        $foreignKey = [];
         // Add the foreign key here, if it's a 'belongsTo'/'belongsToMany' relation
         if (method_exists($relation, 'getForeignKey')) {
             $foreignKey = $relation->getForeignKey();
         } else {
             if (method_exists($relation, 'getQualifiedForeignPivotKeyName')) {
                 $foreignKey = $relation->getQualifiedForeignPivotKeyName();
-            } else {
+            } elseif (method_exists($relation, 'getQualifiedForeignKeyName')) {
                 $foreignKey = $relation->getQualifiedForeignKeyName();
             }
         }
