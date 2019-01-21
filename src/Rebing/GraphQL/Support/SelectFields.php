@@ -13,7 +13,7 @@ class SelectFields
     private static $args = [];
 
     /** @var array */
-    private static $select = [];
+    public static $select = [];
 
     /** @var array */
     private static $customQueries = [];
@@ -269,30 +269,48 @@ class SelectFields
             ;
     }
 
-    public function getRelations($items = false, $customQueries = false)
+    public function getRelations($items = false, $path = '')
     {
-        $relations = [];
-        if ($items === false && $customQueries === false) {
-            $items = self::$select;
-            $customQueries = self::$customQueries;
+        $results = [];
+        if( ! $items) {
+            $items = static::$select;
         }
-        $that = $this;
-        $args = self::$args;
+
         foreach ($items as $key => $item) {
             if (is_array($item)) {
-                $customQuery = $customQueries[$key] ?? null;
-                $relations[$key] = function ($query) use ($that, $args, $item, $customQuery) {
-                    if ($customQuery && isset($customQuery['customQuery'])) {
-                        $query = $customQuery['customQuery']($args, $query);
-                    }
-                    $query->with($that->getRelations($item, $customQuery));
-                    $query->select($that->getSelect($item));
-                };
+                $results[] = $path . $key;
+
+                $results = array_merge($results, $this->getRelations($item, $path . $key . '.'));
             }
         }
 
-        return $relations;
+        return $results;
     }
+
+//    public function getRelations($items = false, $customQueries = false)
+//    {
+//        $relations = [];
+//        if ($items === false && $customQueries === false) {
+//            $items = self::$select;
+//            $customQueries = self::$customQueries;
+//        }
+//        $that = $this;
+//        $args = self::$args;
+//        foreach ($items as $key => $item) {
+//            if (is_array($item)) {
+//                $customQuery = $customQueries[$key] ?? null;
+//                $relations[$key] = function ($query) use ($that, $args, $item, $customQuery) {
+//                    if ($customQuery && isset($customQuery['customQuery'])) {
+//                        $query = $customQuery['customQuery']($args, $query);
+//                    }
+//                    $query->with($that->getRelations($item, $customQuery));
+//                    $query->select($that->getSelect($item));
+//                };
+//            }
+//        }
+//
+//        return $relations;
+//    }
 
     private static function removeTableTame($name)
     {
